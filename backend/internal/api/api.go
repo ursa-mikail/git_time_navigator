@@ -79,6 +79,8 @@ func (s *Server) Router() http.Handler {
 		// Meta
 		r.Get("/repos/{id}/authors", s.listAuthors)
 		r.Get("/repos/{id}/branches", s.listBranches)
+		r.Get("/repos/{id}/daterange", s.dateRange)
+		r.Get("/repos/{id}/dates", s.distinctDates)
 		r.Get("/repos/{id}/log", s.navLog)
 
 		// Filter presets
@@ -479,6 +481,31 @@ func (s *Server) listBranches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, branches)
+}
+
+func (s *Server) dateRange(w http.ResponseWriter, r *http.Request) {
+	id := paramInt(r, "id")
+	from, to, err := s.db.DateRange(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{
+		"from":     from.Format("2006/01/02"),
+		"to":       to.Format("2006/01/02"),
+		"from_iso": from.UTC().Format("2006-01-02"),
+		"to_iso":   to.UTC().Format("2006-01-02"),
+	})
+}
+
+func (s *Server) distinctDates(w http.ResponseWriter, r *http.Request) {
+	id := paramInt(r, "id")
+	dates, err := s.db.DistinctDates(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, dates)
 }
 
 func (s *Server) navLog(w http.ResponseWriter, r *http.Request) {

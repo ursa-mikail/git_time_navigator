@@ -394,3 +394,22 @@ func (d *DB) DateRange(ctx context.Context, repoID int) (time.Time, time.Time, e
 	err := d.pool.QueryRow(ctx, `SELECT MIN(committed_at), MAX(committed_at) FROM commits WHERE repo_id=$1`, repoID).Scan(&from, &to)
 	return from, to, err
 }
+
+// DistinctDates returns every unique commit date (yyyy/mm/dd) for a repo, ordered newest first.
+func (d *DB) DistinctDates(ctx context.Context, repoID int) ([]string, error) {
+	rows, err := d.pool.Query(ctx, `
+		SELECT DISTINCT TO_CHAR(committed_at, 'YYYY/MM/DD') AS day
+		FROM commits WHERE repo_id=$1
+		ORDER BY day DESC`, repoID)
+	if err != nil {
+		return []string{}, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var s string
+		rows.Scan(&s)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}

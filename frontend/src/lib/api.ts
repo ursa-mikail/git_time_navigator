@@ -68,6 +68,12 @@ export const metaApi = {
   branches: (id: number) =>
     api.get<string[]>(`/api/repos/${id}/branches`)
       .then(r => Array.isArray(r.data) ? r.data : [] as string[]),
+  dateRange: (id: number) =>
+    api.get<{ from: string; to: string; from_iso: string; to_iso: string }>(`/api/repos/${id}/daterange`)
+      .then(r => r.data),
+  distinctDates: (id: number) =>
+    api.get<string[]>(`/api/repos/${id}/dates`)
+      .then(r => Array.isArray(r.data) ? r.data : [] as string[]),
   navLog: (id: number) =>
     api.get<NavigationLog[]>(`/api/repos/${id}/log`)
       .then(r => Array.isArray(r.data) ? r.data : [] as NavigationLog[]),
