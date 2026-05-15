@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gitnav_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gitnav}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gitnav}
+      POSTGRES_DB: ${POSTGRES_DB:-gitnavdb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - gitnav_pgdata:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitnav}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - GONOSUMDB=*
+        - GONOSUMCHECK=*
+        - GOPROXY=https://proxy.golang.org,direct
+    container_name: gitnav_backend
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gitnav}:${POSTGRES_PASSWORD:-gitnav}@postgres:5432/${POSTGRES_DB:-gitnavdb}?sslmode=disable
+      PORT: ${BACKEND_PORT:-8080}
+      # Host home dir so the backend can resolve ~ to the right place
+      HOST_HOME: ${HOST_HOME:-/root}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - gitnav_repos:/tmp/repos
+      # Mount the host SSH directory read-only so keys are accessible inside
+      - ${HOME}/.ssh:/home/hostuser/.ssh:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    container_name: gitnav_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  gitnav_pgdata:
+  gitnav_repos:
