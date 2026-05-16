@@ -1,5 +1,5 @@
 import { useState, useEffect, useId, useRef } from 'react'
-import { Filter, Save, X, RotateCcw, BookmarkPlus, Calendar, ChevronDown } from 'lucide-react'
+import { Filter, Save, X, RotateCcw, BookmarkPlus, Calendar, ChevronDown, FileText, Info } from 'lucide-react'
 import { metaApi } from '../lib/api'
 import type { CommitFilter, FilterPreset } from '../types'
 
@@ -9,28 +9,24 @@ interface Props {
   onChange: (f: CommitFilter) => void
 }
 
-// ── Format helpers ────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-// yyyy/mm/dd string → ISO timestamp string for the API
 function toISO(display: string, endOfDay = false): string | undefined {
   const clean = display.trim().replace(/\//g, '-')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return undefined
   return clean + (endOfDay ? 'T23:59:59Z' : 'T00:00:00Z')
 }
 
-// ISO timestamp → yyyy/mm/dd display string
 function toDisplay(iso: string | undefined): string {
   if (!iso) return ''
   return iso.split('T')[0].replace(/-/g, '/')
 }
 
-// Check a typed string is valid yyyy/mm/dd (or empty)
-function isValid(s: string): boolean {
+function isValidDate(s: string): boolean {
   if (!s.trim()) return true
   return /^\d{4}\/\d{2}\/\d{2}$/.test(s.trim())
 }
 
-// JS Date → yyyy/mm/dd
 function dateToDisplay(d: Date): string {
   return [
     d.getFullYear(),
@@ -39,14 +35,11 @@ function dateToDisplay(d: Date): string {
   ].join('/')
 }
 
-// ── DateInput ─────────────────────────────────────────────────────────────────
-// Fully controlled: `committed` is the authoritative display value from the parent.
-// `draft` holds what the user is currently typing. On blur / Enter / datalist
-// pick, draft is validated and committed up to parent.
+// ── DateInput — fully controlled with datalist ────────────────────────────────
 interface DateInputProps {
   inputId: string
   listId: string
-  committed: string          // canonical yyyy/mm/dd from parent (can be '')
+  committed: string
   placeholder: string
   allDates: string[]
   endOfDay?: boolean
@@ -55,28 +48,23 @@ interface DateInputProps {
 
 function DateInput({ inputId, listId, committed, placeholder, allDates, endOfDay = false, onCommit }: DateInputProps) {
   const [draft, setDraft] = useState(committed)
-  const prevCommitted = useRef(committed)
+  const prev = useRef(committed)
 
-  // When the parent pushes a new committed value (e.g. "All" button, reset),
-  // overwrite draft immediately — but only if the value actually changed.
+  // Sync draft whenever parent pushes a new committed value
   useEffect(() => {
-    if (committed !== prevCommitted.current) {
+    if (committed !== prev.current) {
       setDraft(committed)
-      prevCommitted.current = committed
+      prev.current = committed
     }
   })
 
   const flush = (val: string) => {
     const v = val.trim()
-    if (!v) {
-      onCommit(undefined)
-    } else if (isValid(v)) {
-      onCommit(toISO(v, endOfDay))
-    }
-    // if invalid — leave draft as-is, don't propagate
+    if (!v) { onCommit(undefined); return }
+    if (isValidDate(v)) onCommit(toISO(v, endOfDay))
   }
 
-  const invalid = draft.length > 0 && !isValid(draft)
+  const invalid = draft.length > 0 && !isValidDate(draft)
 
   return (
     <div>
@@ -85,37 +73,97 @@ function DateInput({ inputId, listId, committed, placeholder, allDates, endOfDay
           id={inputId}
           list={listId}
           className="input"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-            paddingRight: 26,
-            borderColor: invalid ? 'var(--danger)' : undefined,
-          }}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 12, paddingRight: 26, borderColor: invalid ? 'var(--danger)' : undefined }}
           placeholder={placeholder}
           value={draft}
           onChange={e => {
             const v = e.target.value
             setDraft(v)
-            // Fire immediately when valid or cleared
-            if (!v.trim() || isValid(v)) flush(v)
+            if (!v.trim() || isValidDate(v)) flush(v)
           }}
           onBlur={e => flush(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') flush((e.target as HTMLInputElement).value) }}
         />
-
         <datalist id={listId}>
           {allDates.map(d => <option key={d} value={d} />)}
         </datalist>
-
         {allDates.length > 0 && (
           <ChevronDown size={11} color="var(--txt-3)"
-            style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
-          />
+            style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
         )}
       </div>
+      {invalid && <div style={{ fontSize: 9, color: 'var(--danger)', marginTop: 2 }}>Expected yyyy/mm/dd</div>}
+    </div>
+  )
+}
 
-      {invalid && (
-        <div style={{ fontSize: 9, color: 'var(--danger)', marginTop: 2 }}>Expected yyyy/mm/dd</div>
+// ── FileInput — text input + datalist of all changed files ────────────────────
+interface FileInputProps {
+  listId: string
+  value: string
+  allFiles: string[]
+  onChange: (val: string | undefined) => void
+}
+
+function FileInput({ listId, value, allFiles, onChange }: FileInputProps) {
+  const [showHint, setShowHint] = useState(false)
+
+  return (
+    <div>
+      <div style={{ position: 'relative' }}>
+        <FileText size={13} color="var(--txt-3)"
+          style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+        <input
+          list={listId}
+          className="input"
+          style={{ paddingLeft: 28, paddingRight: 26, fontFamily: 'var(--font-mono)', fontSize: 12 }}
+          placeholder="e.g. src/auth/login.py"
+          value={value}
+          onChange={e => onChange(e.target.value || undefined)}
+        />
+        <datalist id={listId}>
+          {allFiles.map(f => <option key={f} value={f} />)}
+        </datalist>
+        {allFiles.length > 0 && (
+          <ChevronDown size={11} color="var(--txt-3)"
+            style={{ position: 'absolute', right: 24, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+        )}
+        <button
+          onMouseEnter={() => setShowHint(true)}
+          onMouseLeave={() => setShowHint(false)}
+          style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'help', color: 'var(--txt-3)', display: 'flex', padding: 0 }}>
+          <Info size={12} />
+        </button>
+      </div>
+
+      {/* Usage hint */}
+      {showHint && (
+        <div style={{
+          marginTop: 6, padding: '8px 10px',
+          background: 'var(--bg-3)', border: '1px solid var(--border-hi)',
+          borderRadius: 6, fontSize: 10, color: 'var(--txt-2)', lineHeight: 1.7,
+          zIndex: 10, position: 'relative',
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--txt)', marginBottom: 3 }}>How file path filter works</div>
+          Filters commits that <strong>touched this exact file</strong>.<br />
+          Type a partial name or pick from the dropdown — it lists the top 200 most-changed files in the repo.<br />
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)' }}>README.md</code>
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)' }}>src/auth/login.py</code>
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)' }}>package.json</code>
+          </div>
+        </div>
+      )}
+
+      {/* Active file badge */}
+      {value && (
+        <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 5, fontSize: 10 }}>
+          <span style={{ color: 'var(--accent-3)' }}>✓</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--txt-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+          <button onClick={() => onChange(undefined)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--txt-3)', display: 'flex', padding: 0, flexShrink: 0 }}>
+            <X size={10} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -125,32 +173,36 @@ function DateInput({ inputId, listId, committed, placeholder, allDates, endOfDay
 export function FilterPanel({ repoId, filter, onChange }: Props) {
   const uid = useId().replace(/:/g, '')
 
-  const [authors,      setAuthors]      = useState<string[]>([])
-  const [branches,     setBranches]     = useState<string[]>([])
-  const [allDates,     setAllDates]     = useState<string[]>([])
-  const [rangeFrom,    setRangeFrom]    = useState('')   // earliest commit yyyy/mm/dd
-  const [rangeTo,      setRangeTo]      = useState('')   // latest  commit yyyy/mm/dd
-  const [presets,      setPresets]      = useState<FilterPreset[]>([])
-  const [presetName,   setPresetName]   = useState('')
+  const [authors,      setAuthors]     = useState<string[]>([])
+  const [branches,     setBranches]    = useState<string[]>([])
+  const [allDates,     setAllDates]    = useState<string[]>([])
+  const [allFiles,     setAllFiles]    = useState<string[]>([])
+  const [rangeFrom,    setRangeFrom]   = useState('')
+  const [rangeTo,      setRangeTo]     = useState('')
+  const [presets,      setPresets]     = useState<FilterPreset[]>([])
+  const [presetName,   setPresetName]  = useState('')
   const [savingPreset, setSavingPreset] = useState(false)
+  const [loading,      setLoading]     = useState(true)
 
-  // Derive display strings directly from filter — single source of truth
   const fromDisplay = toDisplay(filter.date_from)
   const toDisplay_  = toDisplay(filter.date_to)
 
   useEffect(() => {
     if (!repoId) return
+    setLoading(true)
 
     metaApi.authors(repoId).then(d => setAuthors(Array.isArray(d) ? d : [])).catch(() => {})
     metaApi.branches(repoId).then(d => setBranches(Array.isArray(d) ? d : [])).catch(() => {})
     metaApi.presets(repoId).then(d => setPresets(Array.isArray(d) ? d : [])).catch(() => {})
     metaApi.distinctDates(repoId).then(d => setAllDates(Array.isArray(d) ? d : [])).catch(() => {})
+    metaApi.distinctFiles(repoId).then(d => setAllFiles(Array.isArray(d) ? d : [])).catch(() => {})
 
     metaApi.dateRange(repoId)
       .then(r => {
         setRangeFrom(r.from)
         setRangeTo(r.to)
-        // Always seed full range when repo loads
+        // Always seed the full range — this sets filter.date_from/to
+        // which flows into fromDisplay / toDisplay_ and into DateInput
         onChange({
           ...filter,
           date_from: toISO(r.from, false),
@@ -158,27 +210,19 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
         })
       })
       .catch(() => {})
+      .finally(() => setLoading(false))
   }, [repoId])
 
   const set = (patch: Partial<CommitFilter>) => onChange({ ...filter, ...patch })
 
   const applyQuickRange = (days: number) => {
     if (days === 0) {
-      // Full repo range
-      onChange({
-        ...filter,
-        date_from: toISO(rangeFrom, false),
-        date_to:   toISO(rangeTo,   true),
-      })
+      onChange({ ...filter, date_from: toISO(rangeFrom, false), date_to: toISO(rangeTo, true) })
     } else {
       const to   = new Date()
       const from = new Date()
       from.setDate(from.getDate() - days)
-      onChange({
-        ...filter,
-        date_from: toISO(dateToDisplay(from), false),
-        date_to:   toISO(dateToDisplay(to),   true),
-      })
+      onChange({ ...filter, date_from: toISO(dateToDisplay(from), false), date_to: toISO(dateToDisplay(to), true) })
     }
   }
 
@@ -187,10 +231,14 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
     date_to:   rangeTo   ? toISO(rangeTo,   true)  : undefined,
   })
 
-  const isFullRange =
+  // "All" is active when From/To match the repo boundaries exactly
+  const isFullRange = !!(
     rangeFrom && rangeTo &&
     fromDisplay === rangeFrom &&
     toDisplay_  === rangeTo
+  )
+
+  const hasNonDateFilter = !!(filter.author || filter.branch || filter.file)
 
   const savePreset = async () => {
     if (!presetName.trim()) return
@@ -201,8 +249,6 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
       setSavingPreset(false)
     } catch { /* ignore */ }
   }
-
-  const hasNonDateFilter = !!(filter.author || filter.branch || filter.file)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -238,10 +284,23 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
           </select>
         </Field>
 
-        {/* File path */}
-        <Field label="File path">
-          <input className="input" placeholder="e.g. src/auth/"
-            value={filter.file || ''} onChange={e => set({ file: e.target.value || undefined })} />
+        {/* File path — with autocomplete + usage hint */}
+        <Field label={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span>File path</span>
+            {allFiles.length > 0 && (
+              <span style={{ fontWeight: 400, color: 'var(--txt-3)', fontSize: 9 }}>
+                ({allFiles.length} files — click ⓘ for help)
+              </span>
+            )}
+          </div>
+        }>
+          <FileInput
+            listId={`${uid}-files`}
+            value={filter.file || ''}
+            allFiles={allFiles}
+            onChange={v => set({ file: v })}
+          />
         </Field>
 
         {/* Date range */}
@@ -251,73 +310,60 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
             <span>Date range</span>
             {allDates.length > 0 && (
               <span style={{ fontWeight: 400, color: 'var(--txt-3)', fontSize: 9 }}>
-                ({allDates.length} active days)
+                ({allDates.length} days with commits)
               </span>
             )}
           </div>
         }>
 
-          {/* Quick-range chips */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+          {/* All — full width, shows actual date span */}
+          <button
+            onClick={() => applyQuickRange(0)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '6px 10px', marginBottom: 6,
+              background: isFullRange ? 'rgba(110,231,255,0.1)' : 'var(--bg-3)',
+              border: `1px solid ${isFullRange ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 4, cursor: 'pointer',
+              fontFamily: 'var(--font-mono)', fontSize: 11,
+              color: isFullRange ? 'var(--accent)' : 'var(--txt-2)',
+              fontWeight: isFullRange ? 700 : 400,
+              transition: 'all 0.12s',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = isFullRange ? 'var(--accent)' : 'var(--border)'; e.currentTarget.style.color = isFullRange ? 'var(--accent)' : 'var(--txt-2)' }}
+          >
+            <span style={{ opacity: 0.5, fontSize: 12, flexShrink: 0 }}>⟷</span>
+            {loading
+              ? <span style={{ color: 'var(--txt-3)', fontFamily: 'var(--font-ui)', fontSize: 10 }}>Loading range…</span>
+              : rangeFrom && rangeTo
+                ? <span style={{ display: 'flex', alignItems: 'center', gap: 0, flex: 1 }}>
+                    <span>{rangeFrom}</span>
+                    <span style={{ opacity: 0.4, margin: '0 6px' }}>→</span>
+                    <span>{rangeTo}</span>
+                    {isFullRange && <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.6 }}>✓ all</span>}
+                  </span>
+                : <span style={{ color: 'var(--txt-3)', fontFamily: 'var(--font-ui)', fontSize: 10 }}>All commits</span>
+            }
+          </button>
 
-            {/* "All" chip — full width, shows the actual span */}
-            <button
-              onClick={() => applyQuickRange(0)}
-              title="Show full commit history"
-              style={{
-                width: '100%', textAlign: 'left', padding: '5px 10px',
-                background: isFullRange ? 'rgba(110,231,255,0.1)' : 'var(--bg-3)',
-                border: `1px solid ${isFullRange ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 4, cursor: 'pointer',
-                fontFamily: 'var(--font-mono)', fontSize: 11,
-                color: isFullRange ? 'var(--accent)' : 'var(--txt-2)',
-                fontWeight: isFullRange ? 700 : 400,
-                transition: 'all 0.12s',
-                display: 'flex', alignItems: 'center', gap: 8,
+          {/* Relative shortcuts */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+            {[{ label: 'Last 7d', days: 7 }, { label: 'Last 30d', days: 30 }, { label: 'Last 90d', days: 90 }].map(({ label, days }) => (
+              <button key={days} onClick={() => applyQuickRange(days)} style={{
+                flex: 1, padding: '3px 0', fontSize: 10,
+                background: 'var(--bg-3)', border: '1px solid var(--border)',
+                borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-ui)', color: 'var(--txt-3)', transition: 'all 0.1s',
               }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = 'var(--accent)'
-                e.currentTarget.style.color = 'var(--accent)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = isFullRange ? 'var(--accent)' : 'var(--border)'
-                e.currentTarget.style.color = isFullRange ? 'var(--accent)' : 'var(--txt-2)'
-              }}
-            >
-              <span style={{ opacity: 0.6, fontSize: 13 }}>⟷</span>
-              {rangeFrom && rangeTo
-                ? <span>{rangeFrom}<span style={{ opacity: 0.5, margin: '0 6px' }}>→</span>{rangeTo}</span>
-                : <span style={{ color: 'var(--txt-3)', fontFamily: 'var(--font-ui)', fontSize: 10 }}>All (loading…)</span>
-              }
-              {isFullRange && (
-                <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.7 }}>✓ active</span>
-              )}
-            </button>
-
-            {/* Relative chips */}
-            <div style={{ display: 'flex', gap: 4 }}>
-              {[{ label: 'Last 7d', days: 7 }, { label: 'Last 30d', days: 30 }, { label: 'Last 90d', days: 90 }].map(({ label, days }) => (
-                <button key={days} onClick={() => applyQuickRange(days)} style={{
-                  flex: 1, padding: '3px 0', fontSize: 10,
-                  background: 'var(--bg-3)', border: '1px solid var(--border)',
-                  borderRadius: 4, cursor: 'pointer',
-                  fontFamily: 'var(--font-ui)', color: 'var(--txt-3)',
-                  transition: 'all 0.1s',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--txt-3)' }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--txt-3)' }}
+              >{label}</button>
+            ))}
           </div>
 
           {/* From */}
           <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 9, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
-              From
-            </div>
+            <div style={{ fontSize: 9, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>From</div>
             <DateInput
               inputId={`${uid}-from`}
               listId={`${uid}-from-list`}
@@ -331,9 +377,7 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
 
           {/* To */}
           <div>
-            <div style={{ fontSize: 9, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
-              To
-            </div>
+            <div style={{ fontSize: 9, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>To</div>
             <DateInput
               inputId={`${uid}-to`}
               listId={`${uid}-to-list`}
@@ -344,7 +388,6 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
               onCommit={iso => set({ date_to: iso })}
             />
           </div>
-
         </Field>
 
         {/* Limit */}
@@ -360,9 +403,7 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
         {/* Saved presets */}
         {presets.length > 0 && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--txt-3)', marginBottom: 6 }}>
-              Saved presets
-            </div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--txt-3)', marginBottom: 6 }}>Saved presets</div>
             {presets.map(p => (
               <button key={p.id} onClick={() => onChange(p.filters as CommitFilter)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '6px 8px',
@@ -380,8 +421,7 @@ export function FilterPanel({ repoId, filter, onChange }: Props) {
 
         {/* Save preset */}
         {hasNonDateFilter && !savingPreset && (
-          <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}
-            onClick={() => setSavingPreset(true)}>
+          <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }} onClick={() => setSavingPreset(true)}>
             <Save size={11} /> Save as preset
           </button>
         )}

@@ -388,7 +388,28 @@ func (d *DB) DistinctBranches(ctx context.Context, repoID int) ([]string, error)
 	return out, rows.Err()
 }
 
-// DateRange returns earliest and latest commit timestamps for a repo
+// DistinctFiles returns the top 200 most-changed file paths for a repo.
+func (d *DB) DistinctFiles(ctx context.Context, repoID int) ([]string, error) {
+	rows, err := d.pool.Query(ctx, `
+		SELECT f, COUNT(*) as cnt
+		FROM commits, UNNEST(files_changed) AS f
+		WHERE repo_id=$1
+		GROUP BY f ORDER BY cnt DESC LIMIT 200`, repoID)
+	if err != nil {
+		return []string{}, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var s string
+		var cnt int
+		rows.Scan(&s, &cnt)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DateRange returns earliest and latest commit timestamps for a repo.
 func (d *DB) DateRange(ctx context.Context, repoID int) (time.Time, time.Time, error) {
 	var from, to time.Time
 	err := d.pool.QueryRow(ctx, `SELECT MIN(committed_at), MAX(committed_at) FROM commits WHERE repo_id=$1`, repoID).Scan(&from, &to)

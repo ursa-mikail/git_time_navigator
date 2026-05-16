@@ -4,7 +4,7 @@ import type {
   DiffFile, AutocompleteResult, FilterPreset, NavigationLog, SwitchRequest, TreeNode
 } from '../types'
 
-const BASE = (import.meta.env.VITE_API_URL as string) || ''
+const BASE = (import.meta.env.VITE_API_URL as string) || 'http://localhost:8080'
 const api = axios.create({ baseURL: BASE })
 
 // Safely extract data; fall back to a default if null/undefined
@@ -73,6 +73,9 @@ export const metaApi = {
       .then(r => r.data),
   distinctDates: (id: number) =>
     api.get<string[]>(`/api/repos/${id}/dates`)
+      .then(r => Array.isArray(r.data) ? r.data : [] as string[]),
+  distinctFiles: (id: number) =>
+    api.get<string[]>(`/api/repos/${id}/files`)
       .then(r => Array.isArray(r.data) ? r.data : [] as string[]),
   navLog: (id: number) =>
     api.get<NavigationLog[]>(`/api/repos/${id}/log`)
